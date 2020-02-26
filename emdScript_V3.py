@@ -12,10 +12,12 @@ from scipy.stats import wasserstein_distance
 import numpy as np
 import re
 import itertools
+import operator
 import random
 import copy
 import matplotlib.pyplot as plt
 import seaborn as sns
+import more_itertools
 
 # test path
 #/Users/plab/Documents/tractProfiles/proj-5a74b26ab7f7fb00495482bd
@@ -253,6 +255,101 @@ def emdPlotsFromTractProfiles(projectDir,keyFilePath,tractName,metricLabel,iterN
         fig.savefig(figPathName,dpi=300)
         
         plt.close() 
+        
+def rankNullSequence(dataStackOut,projectDir,):
+    comparisons=np.unique(pd.DataFrame.to_numpy(dataStackOut['comparison']))
+    saveDir=os.path.join(projectDir,'bids','figs')
+    
+    for iComparisons in range(len(comparisons)):
+        currentComparison=comparisons[iComparisons]
+        #arbitrary paramter for minimum sequence length
+        minSeqLength=1
+       
+        
+        #subset corresponding to 
+        subset1=dataStackOut.loc[np.logical_and(dataStackOut['comparison']==currentComparison,dataStackOut['sorting']=='reshuffle')]
+         #compute the proportion of the total represented by the max ranked model
+        maxProportion=1/subset1.shape[0]
+        #quick and dirty because exclusive
+        queriredProportions=np.arange(-1,int(np.round(np.log10(maxProportion)))-1,-1)
+        #why the indexing?
+        queriedRanks=np.zeros((1,len(queriredProportions)))[0]
+        for iProportions in range(len(queriredProportions)):
+            curProp=queriredProportions[iProportions]
+            queriedRanks[iProportions]=np.power(10, float(curProp))
+        if not(queriedRanks[-1]==maxProportion):
+            rankValues=subset1.shape[0]*np.append(queriedRanks,maxProportion)
+        else:
+            rankValues=subset1.shape[0]*queriedRanks
+            
+        #inialize table for the current ranking
+        #watch the minus two
+        comparisonOrderMagnitudeArray=np.zeros((len(rankValues),subset1.shape[1]-2))
+        rankFrame=copy.deepcopy(subset1)
+        #remember the ordering, we want descending becaues higher emd = greater distance
+        for currentRankValIndex in range(len(rankValues)):
+            currentRankVal=rankValues[currentRankValIndex]
+            print(currentRankVal)
+            currBoolMask=pd.DataFrame.to_numpy(rankFrame.rank(axis=0,numeric_only=True,ascending=False))<=currentRankVal
+            #30 as an arbitrary limit on the 
+
+            countStruc=np.zeros([currBoolMask.shape[0],200])
+            
+            for iIterations in range(currBoolMask.shape[0]):
+                currentIterTrueLocations=np.where(currBoolMask[iIterations,:])
+               
+                saved_groups = []
+                groupLengths = []
+                for group in more_itertools.consecutive_groups(currentIterTrueLocations[0][:]):
+                    currentGroup=list(group)
+                    groupLengths.append(len(currentGroup))
+
+                       
+                    #print(saved_groups[0][-1])
+                #print(groupLengths)
+           
+                for iConsecNodeVals in range(minSeqLength,max(groupLengths,default=2)+1):
+                    curNumVec=(np.asarray(groupLengths)-iConsecNodeVals)+1
+                    curNumVec[curNumVec<0]=0
+                    curMatchesAvailable=np.sum(curNumVec)
+                    countStruc[iIterations,iConsecNodeVals]=curMatchesAvailable
+                
+            comparisonOrderMagnitudeArray[currentRankValIndex,:]=np.sum(countStruc,axis=0)
+            MagnitudeArrayDim=comparisonOrderMagnitudeArray.shape
+            logMagnitudeArray=np.zeros((MagnitudeArrayDim))
+            #always going to be in the row dimension, so dont worry about it
+            maxVal=np.max(np.where(comparisonOrderMagnitudeArray))
+            for iXvals in range(MagnitudeArrayDim[1]):
+                for iYvals in range(MagnitudeArrayDim[0]):
+                    if comparisonOrderMagnitudeArray[iYvals,iXvals]>0:
+                        logMagnitudeArray[iYvals,iXvals]=np.log10(comparisonOrderMagnitudeArray[iYvals,iXvals])
+                        #else do nothing
+            columnHeaders=np.hstack(['proportion',range(maxVal)])         
+            currentFrame=pd.DataFrame(np.hstack([np.reshape(queriedRanks,(-1,1)),logMagnitudeArray[:,0:maxVal]]),columns=columnHeaders)
+            currentFrame=pd.melt(currentFrame,id_vars='proportion')
+            currentFrame.columns=['rank proportion threshold','nodes','logNum']
+            currentFrame['nodes']=pd.to_numeric(currentFrame["nodes"])
+            
+            currentFrame=currentFrame.pivot('threshold','nodes','logNum')
+            mask = np.zeros_like(currentFrame.values)
+            mask[currentFrame.values==0] = True
+
+            fig, ax = plt.subplots()
+            
+            sns.heatmap(currentFrame,cbar=True,mask=mask,cbar_kws={'label': 'log10 number of contiguous sequences'})
+                    
+            fig.suptitle('EMD comparison for '+ iComparisons + ' relative to null for ' + tractName  , fontsize=16)
+            figPathName=saveDir+'/'+tractName+'_sequenceLengthPlot_'+iComparisons+'.svg'  
+            fig.savefig(figPathName,dpi=300)
+        
+            plt.close()     
+
+        
+        
+            
+        
+        
+        
 
 newRange= range(len(tractNames))[1:]
 for iTracts in newRange:
